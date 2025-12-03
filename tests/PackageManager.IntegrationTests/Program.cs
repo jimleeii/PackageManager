@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using PackageManager.Configuration;
-using Test;
+using PackageManager.IntegrationTests;
+
+// Run integration tests and examples
 
 var builder = WebApplication.CreateBuilder(args);
 

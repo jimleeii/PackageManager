@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Options;
 using PackageManager.Configuration;
 using PackageManager.Core;
-using PackageManager.Helper;
+using PackageManager.Helpers;
 
 namespace PackageManager.FileWatching;
 
@@ -35,7 +35,7 @@ public class PackageFileWatcherService(
     {
         if (string.IsNullOrWhiteSpace(_options.PackageSource) || !Directory.Exists(_options.PackageSource))
         {
-            _logger.LogWarning("LocalSource not configured or does not exist. File watching is disabled.");
+            _logger.LogWarning("PackageSource not configured or does not exist. File watching is disabled.");
             return Task.CompletedTask;
         }
 
@@ -68,6 +68,22 @@ public class PackageFileWatcherService(
     /// that detected the change.</param>
     /// <param name="e">An event argument containing information about the changed file, including its path and relevant metadata.</param>
     private async void OnFileChanged(object? sender, FileChangedEventArgs e)
+    {
+        try
+        {
+            await OnFileChangedAsync(e);
+        }
+        catch (Exception ex)
+        {
+            // Final safety net to catch any unhandled exceptions in async void method
+            _logger.LogError(ex, "Unhandled exception in file change handler for: {FilePath}", e.FilePath);
+        }
+    }
+
+    /// <summary>
+    /// Async implementation of file change handling.
+    /// </summary>
+    private async Task OnFileChangedAsync(FileChangedEventArgs e)
     {
         _logger.LogFileOperation("File changed detected", e.FilePath);
 

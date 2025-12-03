@@ -1,4 +1,4 @@
-namespace PackageManager.Helper;
+namespace PackageManager.Helpers;
 
 /// <summary>
 /// Provides extension methods for logging operations throughout the application.
@@ -128,9 +128,7 @@ public static class LoggerExtensions
         public void Dispose()
         {
             if (_disposed)
-            {
                 return;
-            }
 
             _stopwatch.Stop();
             if (_logger.IsEnabled(LogLevel.Information))

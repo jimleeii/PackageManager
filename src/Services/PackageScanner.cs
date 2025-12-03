@@ -1,6 +1,8 @@
 using PackageManager.Models;
+using PackageManager.Core;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 
 namespace PackageManager.Services;
 
@@ -9,6 +11,10 @@ namespace PackageManager.Services;
 /// </summary>
 public class PackageScanner
 {
+    /// <summary>
+    /// Event raised when diagnostic information should be logged.
+    /// </summary>
+    public event EventHandler<PackageScannerLogEventArgs>? LogMessage;
     /// <summary>
     /// Scans an assembly and extracts metadata about its types and methods.
     /// </summary>
@@ -87,7 +93,7 @@ public class PackageScanner
         catch (Exception ex)
         {
             // Log or handle exceptions during assembly scanning
-            Console.WriteLine($"Error scanning assembly {assembly.FullName}: {ex.Message}");
+            LogMessage?.Invoke(this, new PackageScannerLogEventArgs($"Error scanning assembly {assembly.FullName}: {ex.Message}", ex));
         }
 
         return (types, methods);
@@ -100,8 +106,9 @@ public class PackageScanner
     /// <param name="packageId">The package identifier.</param>
     /// <param name="version">The package version.</param>
     /// <param name="allowedFrameworks">Optional list of allowed framework versions. If null or empty, all frameworks are scanned.</param>
+    /// <param name="loadContext">Optional AssemblyLoadContext for isolated loading. If null, uses default context.</param>
     /// <returns>Package metadata containing all scanned information.</returns>
-    public PackageMetadata ScanPackage(string packagePath, string packageId, string version, List<string>? allowedFrameworks = null)
+    public PackageMetadata ScanPackage(string packagePath, string packageId, string version, List<string>? allowedFrameworks = null, AssemblyLoadContext? loadContext = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packagePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
@@ -140,7 +147,11 @@ public class PackageScanner
             {
                 try
                 {
-                    var assembly = Assembly.LoadFrom(dllFile);
+                    // Load assembly in specified context or default
+                    var assembly = loadContext != null
+                        ? loadContext.LoadFromAssemblyPath(dllFile)
+                        : Assembly.LoadFrom(dllFile);
+                        
                     metadata.Assemblies.Add(assembly.GetName().Name ?? Path.GetFileNameWithoutExtension(dllFile));
 
                     var (types, methods) = ScanAssembly(assembly);
@@ -150,11 +161,36 @@ public class PackageScanner
                 catch (Exception ex)
                 {
                     // Log assembly load failures but continue scanning
-                    Console.WriteLine($"Failed to load assembly {dllFile}: {ex.Message}");
+                    LogMessage?.Invoke(this, new PackageScannerLogEventArgs($"Failed to load assembly {dllFile}: {ex.Message}", ex));
                 }
             }
         }
 
         return metadata;
+    }
+}
+
+/// <summary>
+/// Event arguments for PackageScanner logging events.
+/// </summary>
+public class PackageScannerLogEventArgs : EventArgs
+{
+    /// <summary>
+    /// Gets the log message.
+    /// </summary>
+    public string Message { get; }
+
+    /// <summary>
+    /// Gets the exception, if any.
+    /// </summary>
+    public Exception? Exception { get; }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PackageScannerLogEventArgs"/> class.
+    /// </summary>
+    public PackageScannerLogEventArgs(string message, Exception? exception = null)
+    {
+        Message = message;
+        Exception = exception;
     }
 }

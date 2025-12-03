@@ -208,6 +208,8 @@ PublishScripts/
 
 # NuGet package folder (custom for this project)
 packages/
+# Package source folder (custom for this project)
+plugins/
 
 # Microsoft Azure Build Output
 csx/

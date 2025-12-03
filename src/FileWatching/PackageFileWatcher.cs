@@ -16,6 +16,11 @@ public class PackageFileWatcher : IDisposable
 
     // Event to raise when a file change is detected
     public event EventHandler<FileChangedEventArgs>? FileChanged;
+    
+    /// <summary>
+    /// Event raised when diagnostic information should be logged.
+    /// </summary>
+    public event EventHandler<PackageFileWatcherLogEventArgs>? LogMessage;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PackageFileWatcher"/> class
@@ -30,7 +35,17 @@ public class PackageFileWatcher : IDisposable
             throw new ArgumentException("Directory path cannot be null or empty", nameof(directoryPath));
 
         if (!Directory.Exists(directoryPath))
-            throw new DirectoryNotFoundException($"Directory not found: {directoryPath}");
+        {
+            var currentDir = Directory.GetCurrentDirectory();
+            var absolutePath = Path.IsPathRooted(directoryPath) 
+                ? directoryPath 
+                : Path.GetFullPath(Path.Combine(currentDir, directoryPath));
+            
+            throw new DirectoryNotFoundException(
+                $"Watch directory not found: {directoryPath}\n" +
+                $"Resolved path: {absolutePath}\n" +
+                $"Tip: Create the directory before enabling file watching.");
+        }
 
         _watcher = new FileSystemWatcher(directoryPath)
         {
@@ -59,9 +74,7 @@ public class PackageFileWatcher : IDisposable
     public void Start()
     {
         if (!_disposed)
-        {
             _watcher.EnableRaisingEvents = true;
-        }
     }
 
     /// <summary>
@@ -69,11 +82,11 @@ public class PackageFileWatcher : IDisposable
     /// </summary>
     public void Stop()
     {
-        if (!_disposed)
-        {
-            _watcher.EnableRaisingEvents = false;
-            _debounceTimer.Stop();
-        }
+        if (_disposed)
+            return;
+
+        _watcher.EnableRaisingEvents = false;
+        _debounceTimer.Stop();
     }
 
     /// <summary>
@@ -124,7 +137,7 @@ public class PackageFileWatcher : IDisposable
     private void OnError(object sender, ErrorEventArgs e)
     {
         // Handle buffer overflow or other errors
-        Console.Error.WriteLine($"File watcher error: {e.GetException()?.Message}");
+        LogMessage?.Invoke(this, new PackageFileWatcherLogEventArgs($"File watcher error: {e.GetException()?.Message}", e.GetException()));
     }
 
     /// <summary>
@@ -132,7 +145,8 @@ public class PackageFileWatcher : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed) 
+            return;
 
         _disposed = true;
         Stop();
@@ -163,4 +177,29 @@ public class FileChangedEventArgs(string? filePath, DateTime changeTime) : Event
     /// The time of the change
     /// </summary>
     public DateTime ChangeTime { get; } = changeTime;
+}
+
+/// <summary>
+/// Event arguments for PackageFileWatcher logging events.
+/// </summary>
+public class PackageFileWatcherLogEventArgs : EventArgs
+{
+    /// <summary>
+    /// Gets the log message.
+    /// </summary>
+    public string Message { get; }
+
+    /// <summary>
+    /// Gets the exception, if any.
+    /// </summary>
+    public Exception? Exception { get; }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PackageFileWatcherLogEventArgs"/> class.
+    /// </summary>
+    public PackageFileWatcherLogEventArgs(string message, Exception? exception = null)
+    {
+        Message = message;
+        Exception = exception;
+    }
 }

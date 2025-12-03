@@ -8,7 +8,7 @@ using NuGet.ProjectManagement;
 using NuGet.Protocol.Core.Types;
 using NuGet.Resolver;
 using NuGet.Versioning;
-using PackageManager.Helper;
+using PackageManager.Helpers;
 using PackageManager.Repository;
 using PackageManager.Services;
 using System.Reflection;
@@ -22,8 +22,16 @@ namespace PackageManager.Core;
 /// </summary>
 public class PackageLoader : IDisposable
 {
+    /// <summary>
+    /// Event raised when diagnostic information should be logged.
+    /// </summary>
+    public event EventHandler<PackageLoaderLogEventArgs>? LogMessage;
     // List to store assembly paths for loaded NuGet packages
     private readonly List<string> _assemblyPaths = [];
+    // Custom assembly load context for isolated loading (optional)
+    private readonly PackageAssemblyLoadContext? _loadContext;
+    // Whether to use assembly isolation
+    private readonly bool _useIsolation;
     // Path to the folder where NuGet packages are stored
     private readonly string _packagesFolder;
     // List of NuGet package sources
@@ -34,6 +42,8 @@ public class PackageLoader : IDisposable
     private readonly PackageScanner? _packageScanner;
     // List of allowed frameworks
     private readonly List<string>? _allowedFrameworks;
+    // Fallback framework to use when target framework cannot be determined
+    private readonly string _fallbackFramework;
     // Flag to indicate whether the object has been disposed
     private bool _disposed;
 
@@ -44,16 +54,26 @@ public class PackageLoader : IDisposable
     /// <param name="localSource">The path to a local folder containing NuGet packages. Defaults to null.</param>
     /// <param name="packageRepository">Optional package repository for storing package metadata.</param>
     /// <param name="allowedFrameworks">Optional list of allowed framework versions to load. If null or empty, all compatible frameworks are loaded.</param>
+    /// <param name="fallbackFramework">The fallback framework to use when target framework cannot be determined. If null, auto-detects from current runtime.</param>
+    /// <param name="useIsolation">Whether to load assemblies in an isolated AssemblyLoadContext. When true, assemblies can be unloaded. Default is false for backward compatibility.</param>
     /// <remarks>
-    /// This constructor sets up the packages folder and subscribes to the <see cref="AppDomain.AssemblyResolve"/> event
-    /// to handle assembly resolution for NuGet packages.
+    /// This constructor sets up the packages folder. If useIsolation is false, it subscribes to the <see cref="AppDomain.AssemblyResolve"/> event.
+    /// If useIsolation is true, assemblies are loaded in a custom AssemblyLoadContext that can be unloaded.
     /// </remarks>
-    public PackageLoader(string packagesFolder = "packages", string? localSource = null, IPackageRepository? packageRepository = null, List<string>? allowedFrameworks = null)
+    public PackageLoader(string packagesFolder = "packages", string? localSource = null, IPackageRepository? packageRepository = null, List<string>? allowedFrameworks = null, string? fallbackFramework = null, bool useIsolation = false)
     {
         _packagesFolder = Path.GetFullPath(packagesFolder);
         _packageRepository = packageRepository;
         _packageScanner = packageRepository != null ? new PackageScanner() : null;
         _allowedFrameworks = allowedFrameworks;
+        _fallbackFramework = fallbackFramework ?? GetRuntimeFrameworkMoniker();
+        _useIsolation = useIsolation;
+
+        // Create isolated load context if requested
+        if (_useIsolation)
+        {
+            _loadContext = new PackageAssemblyLoadContext("PackageManager", _assemblyPaths, isCollectible: true);
+        }
 
         // Add default NuGet source
         _packageSources.Add(new PackageSource("https://api.nuget.org/v3/index.json", "nuget.org"));
@@ -62,12 +82,22 @@ public class PackageLoader : IDisposable
         if (!string.IsNullOrEmpty(localSource))
         {
             if (!Directory.Exists(localSource))
-                throw new DirectoryNotFoundException($"Local NuGet source directory not found: {localSource}");
+            {
+                var currentDir = Directory.GetCurrentDirectory();
+                throw new DirectoryNotFoundException(
+                    $"Local NuGet source directory not found: {localSource}\n" +
+                    $"Current directory: {currentDir}\n" +
+                    $"Tip: Use an absolute path or ensure the directory exists relative to the current directory.");
+            }
 
             _packageSources.Add(new PackageSource(localSource, "Local"));
         }
 
-        AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
+        // Only use AppDomain.AssemblyResolve if not using isolated context
+        if (!_useIsolation)
+        {
+            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
+        }
     }
 
     /// <summary>
@@ -78,45 +108,67 @@ public class PackageLoader : IDisposable
     /// <returns>A task that represents the asynchronous installation operation</returns>
     public async Task InstallPackageAsync(string filePath, Microsoft.Extensions.Logging.ILogger? logger = null)
     {
-        // Extract package name and version from file name (e.g., "Newtonsoft.Json.13.0.1")
-        string packageName = Path.GetFileNameWithoutExtension(filePath);
-
-        if (string.IsNullOrWhiteSpace(packageName))
+        if (!File.Exists(filePath))
         {
-            if (logger?.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Warning) == true)
-            {
-                logger.LogWarning("Could not extract package name from: {FilePath}", filePath);
-            }
+            logger?.LogWarning("Package file not found: {FilePath}", filePath);
             return;
         }
 
-        // Split package name and version (last segment after final dot is assumed to be version)
-        var parts = packageName.Split('.');
         string? packageId = null;
         string? version = null;
 
-        // Find where the version starts (first numeric segment)
-        int versionStartIndex = -1;
-        for (int i = parts.Length - 1; i >= 0; i--)
+        try
         {
-            if (char.IsDigit(parts[i][0]))
+            // Use PackageArchiveReader to read metadata from .nuspec file inside .nupkg
+            using var packageReader = new PackageArchiveReader(filePath);
+            var identity = packageReader.GetIdentity();
+            packageId = identity.Id;
+            version = identity.Version.ToString();
+        }
+        catch (Exception ex)
+        {
+            // Fallback to filename parsing if package reading fails
+            logger?.LogWarning("Failed to read package metadata from {FilePath}, falling back to filename parsing: {Error}", filePath, ex.Message);
+            
+            string packageName = Path.GetFileNameWithoutExtension(filePath);
+            if (string.IsNullOrWhiteSpace(packageName))
             {
-                versionStartIndex = i;
+                logger?.LogWarning("Could not extract package name from: {FilePath}", filePath);
+                return;
+            }
+
+            // Split package name and version (last segment after final dot is assumed to be version)
+            var parts = packageName.Split('.');
+            
+            // Find where the version starts (first numeric segment from the end)
+            int versionStartIndex = -1;
+            for (int i = parts.Length - 1; i >= 0; i--)
+            {
+                if (parts[i].Length > 0 && char.IsDigit(parts[i][0]))
+                {
+                    versionStartIndex = i;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if (versionStartIndex > 0)
+            {
+                packageId = string.Join(".", parts.Take(versionStartIndex));
+                version = string.Join(".", parts.Skip(versionStartIndex));
             }
             else
             {
-                break;
+                packageId = packageName;
             }
         }
 
-        if (versionStartIndex > 0)
+        if (string.IsNullOrWhiteSpace(packageId))
         {
-            packageId = string.Join(".", parts.Take(versionStartIndex));
-            version = string.Join(".", parts.Skip(versionStartIndex));
-        }
-        else
-        {
-            packageId = packageName;
+            logger?.LogWarning("Could not determine package ID from: {FilePath}", filePath);
+            return;
         }
 
         logger?.LogPackageOperation(packageId, version ?? "(latest)", "Loading");
@@ -218,10 +270,9 @@ public class PackageLoader : IDisposable
         {
             try
             {
-                var findPackageResource = await sourceRepository.GetResourceAsync<FindPackageByIdResource>();
-                if (findPackageResource == null) continue;
-
-                var versions = await findPackageResource.GetAllVersionsAsync(
+            var findPackageResource = await sourceRepository.GetResourceAsync<FindPackageByIdResource>();
+            if (findPackageResource == null) 
+                continue;                var versions = await findPackageResource.GetAllVersionsAsync(
                     packageId,
                     cacheContext,
                     logger,
@@ -244,7 +295,11 @@ public class PackageLoader : IDisposable
             }
         }
 
-        throw new InvalidOperationException($"Unable to find any versions of package '{packageId}' in the configured sources.");
+        var sourceNames = string.Join(", ", sourceRepositories.Select(s => s.PackageSource.Name));
+        throw new InvalidOperationException(
+            $"Unable to find any versions of package '{packageId}' in the configured sources.\n" +
+            $"Searched sources: {sourceNames}\n" +
+            $"Tip: Verify the package ID is correct and the package exists in the configured NuGet sources.");
     }
 
     /// <summary>
@@ -252,15 +307,41 @@ public class PackageLoader : IDisposable
     /// </summary>
     /// <returns>
     /// A <see cref="NuGetFramework"/> object that represents the current framework.
-    /// If the target framework cannot be determined, returns the fallback framework "net8.0".
+    /// If the target framework cannot be determined, returns the configured fallback framework.
     /// </returns>
-    private static NuGetFramework GetCurrentNuGetFramework()
+    private NuGetFramework GetCurrentNuGetFramework()
     {
         var targetFramework = Assembly.GetEntryAssembly()?.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName;
 
-        return targetFramework != null ?
-            NuGetFramework.Parse(targetFramework) :
-            NuGetFramework.Parse("net8.0"); // Updated fallback framework
+        return targetFramework != null 
+            ? NuGetFramework.Parse(targetFramework) 
+            : NuGetFramework.Parse(_fallbackFramework);
+    }
+
+    /// <summary>
+    /// Gets the runtime framework moniker for the current executing runtime.
+    /// </summary>
+    /// <returns>The framework moniker (e.g., "net8.0", "net9.0").</returns>
+    private static string GetRuntimeFrameworkMoniker()
+    {
+        var frameworkName = Assembly.GetExecutingAssembly()?.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName;
+        if (frameworkName != null)
+        {
+            var framework = NuGetFramework.Parse(frameworkName);
+            return framework.GetShortFolderName();
+        }
+
+        // Final fallback based on runtime version
+        var runtimeVersion = Environment.Version;
+        return runtimeVersion.Major switch
+        {
+            >= 10 => "net10.0",
+            9 => "net9.0",
+            8 => "net8.0",
+            7 => "net7.0",
+            6 => "net6.0",
+            _ => "net8.0" // Ultimate fallback to LTS version
+        };
     }
 
     /// <summary>
@@ -288,7 +369,8 @@ public class PackageLoader : IDisposable
                     Framework = NuGetFramework.Parse(Path.GetFileName(d))
                 })
                 .Where(f => DefaultCompatibilityProvider.Instance.IsCompatible(framework, f.Framework))
-                .Where(f => _allowedFrameworks == null || _allowedFrameworks.Count == 0 || 
+                .Where(f => _allowedFrameworks == null || 
+                           _allowedFrameworks.Count == 0 || 
                            _allowedFrameworks.Contains(f.FrameworkName, StringComparer.OrdinalIgnoreCase))
                 .OrderByDescending(f => f.Framework, new PackageFrameworkSorter())
                 .ToList();
@@ -303,6 +385,7 @@ public class PackageLoader : IDisposable
 
     /// <summary>
     /// Resolves and loads an assembly from the collected assembly paths.
+    /// Only used when not using AssemblyLoadContext isolation.
     /// </summary>
     /// <param name="sender">The source of the event.</param>
     /// <param name="args">The event data containing the name of the assembly to resolve.</param>
@@ -316,6 +399,10 @@ public class PackageLoader : IDisposable
     /// </remarks>
     private Assembly? CurrentDomainAssemblyResolve(object? sender, ResolveEventArgs args)
     {
+        // If using isolated context, this shouldn't be called
+        if (_useIsolation)
+            return null;
+
         var assemblyName = new AssemblyName(args.Name);
         var dllPath = _assemblyPaths.FirstOrDefault(p =>
             Path.GetFileNameWithoutExtension(p).Equals(assemblyName.Name, StringComparison.OrdinalIgnoreCase));
@@ -340,30 +427,30 @@ public class PackageLoader : IDisposable
                 .FirstOrDefault(d =>
                 {
                     var dirName = Path.GetFileName(d);
-                    return dirName.StartsWith(packageId, StringComparison.OrdinalIgnoreCase) && dirName.EndsWith(version, StringComparison.OrdinalIgnoreCase);
+                    return dirName.StartsWith(packageId, StringComparison.OrdinalIgnoreCase) && 
+                           dirName.EndsWith(version, StringComparison.OrdinalIgnoreCase);
                 });
 
             if (packageDir == null)
             {
-                Console.WriteLine($"Package directory not found for '{packageId}'");
+                LogMessage?.Invoke(this, new PackageLoaderLogEventArgs(PackageLoaderLogLevel.Warning, $"Package directory not found for '{packageId}'"));
                 return Task.CompletedTask;
             }
 
-            // Scan the package
-            var metadata = _packageScanner.ScanPackage(packageDir, packageId, version, _allowedFrameworks);
+            // Scan the package with optional load context for isolated loading
+            var metadata = _packageScanner.ScanPackage(packageDir, packageId, version, _allowedFrameworks, _loadContext);
 
             // Add to repository
             _packageRepository.AddOrUpdate(metadata);
 
-            Console.WriteLine($"Cataloged package '{packageId}' v{version} with {metadata.Methods.Count} methods");
+            LogMessage?.Invoke(this, new PackageLoaderLogEventArgs(PackageLoaderLogLevel.Information, $"Cataloged package '{packageId}' v{version} with {metadata.Methods.Count} methods"));
+            return Task.CompletedTask;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error cataloging package '{packageId}': {ex.Message}");
+            LogMessage?.Invoke(this, new PackageLoaderLogEventArgs(PackageLoaderLogLevel.Error, $"Error cataloging package '{packageId}': {ex.Message}", ex));
             return Task.FromException(ex);
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -372,19 +459,87 @@ public class PackageLoader : IDisposable
     public IPackageRepository? PackageRepository => _packageRepository;
 
     /// <summary>
+    /// Gets the assembly load context if isolation is enabled.
+    /// </summary>
+    public PackageAssemblyLoadContext? LoadContext => _loadContext;
+
+    /// <summary>
+    /// Gets whether assembly isolation is enabled.
+    /// </summary>
+    public bool IsIsolationEnabled => _useIsolation;
+
+    /// <summary>
     /// Releases all resources used by the <see cref="PackageLoader"/> instance.
     /// </summary>
     /// <remarks>
-    /// This method unregisters the AssemblyResolve event handler and suppresses
+    /// This method unregisters the AssemblyResolve event handler (if not using isolation)
+    /// and unloads the AssemblyLoadContext (if using isolation), then suppresses
     /// finalization to release unmanaged resources and improve performance.
     /// </remarks>
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed) 
+            return;
 
         _disposed = true;
 
-        AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomainAssemblyResolve;
+        if (_useIsolation)
+        {
+            // Unload the isolated context (this unloads all assemblies loaded in it)
+            _loadContext?.Unload();
+        }
+        else
+        {
+            // Only unregister event if we registered it
+            AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomainAssemblyResolve;
+        }
+        
         GC.SuppressFinalize(this);
     }
+}
+
+/// <summary>
+/// Event arguments for PackageLoader logging events.
+/// </summary>
+public class PackageLoaderLogEventArgs : EventArgs
+{
+    /// <summary>
+    /// Gets the log level.
+    /// </summary>
+    public PackageLoaderLogLevel Level { get; }
+
+    /// <summary>
+    /// Gets the log message.
+    /// </summary>
+    public string Message { get; }
+
+    /// <summary>
+    /// Gets the exception, if any.
+    /// </summary>
+    public Exception? Exception { get; }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PackageLoaderLogEventArgs"/> class.
+    /// </summary>
+    public PackageLoaderLogEventArgs(PackageLoaderLogLevel level, string message, Exception? exception = null)
+    {
+        Level = level;
+        Message = message;
+        Exception = exception;
+    }
+}
+
+/// <summary>
+/// Log levels for PackageLoader diagnostics.
+/// </summary>
+public enum PackageLoaderLogLevel
+{
+    /// <summary>Debug level messages.</summary>
+    Debug,
+    /// <summary>Informational messages.</summary>
+    Information,
+    /// <summary>Warning messages.</summary>
+    Warning,
+    /// <summary>Error messages.</summary>
+    Error
 }

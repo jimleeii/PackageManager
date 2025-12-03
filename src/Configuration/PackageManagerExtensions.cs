@@ -25,7 +25,10 @@ public static class PackageManagerExtensions
     /// </remarks>
     public static void AddPackageManager(this IServiceCollection services, IConfiguration configuration)
     {
-        services.Configure<PackageManagerOptions>(configuration.GetSection(PackageManagerOptions.SectionName));
+        services.AddOptions<PackageManagerOptions>()
+            .Bind(configuration.GetSection(PackageManagerOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Read options early to determine if file watcher should be registered
         var options = configuration.GetSection(PackageManagerOptions.SectionName).Get<PackageManagerOptions>();
@@ -35,13 +38,16 @@ public static class PackageManagerExtensions
         services.AddSingleton<PackageScanner>();
         services.AddSingleton<DynamicMethodInvoker>();
 
-        // Register PackageLoader
+        // Register PackageLoader as singleton with proper disposal
         services.AddSingleton<PackageLoader>(sp =>
         {
             var opts = sp.GetRequiredService<IOptions<PackageManagerOptions>>().Value;
             var repository = sp.GetRequiredService<IPackageRepository>();
             return new PackageLoader("packages", opts.PackageSource, repository, opts.AllowedFrameworks);
         });
+
+        // Register disposal hook to ensure PackageLoader is disposed on app shutdown
+        services.AddHostedService<PackageLoaderDisposalService>();
 
         if (options?.EnableFileWatching == true)
         {
@@ -73,7 +79,18 @@ public static class PackageManagerExtensions
 
         string directoryPath = options.PackageSource;
         if (!Directory.Exists(directoryPath))
-            throw new DirectoryNotFoundException($"Directory not found: {directoryPath}");
+        {
+            var currentDir = Directory.GetCurrentDirectory();
+            var absolutePath = Path.IsPathRooted(directoryPath) 
+                ? directoryPath 
+                : Path.GetFullPath(Path.Combine(currentDir, directoryPath));
+            
+            throw new DirectoryNotFoundException(
+                $"Package source directory not found: {directoryPath}\n" +
+                $"Resolved path: {absolutePath}\n" +
+                $"Current directory: {currentDir}\n" +
+                $"Tip: Create the directory or update 'PackageManager:PackageSource' in appsettings.json.");
+        }
 
         var loader = app.Services.GetRequiredService<PackageLoader>();
         foreach (var file in Directory.GetFiles(directoryPath, "*.nupkg"))

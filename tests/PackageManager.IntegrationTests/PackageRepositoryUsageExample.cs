@@ -1,7 +1,7 @@
 using PackageManager.Repository;
 using PackageManager.Services;
 
-namespace Test.Examples;
+namespace PackageManager.IntegrationTests;
 
 /// <summary>
 /// Example usage of the package repository and dynamic method invoker.

@@ -33,7 +33,28 @@ public class DynamicMethodInvoker(IPackageRepository packageRepository)
         var methodInfos = _packageRepository.FindMethodsByName(methodName).ToList();
 
         if (methodInfos.Count == 0)
-            throw new InvalidOperationException($"Method '{methodName}' not found in any loaded package.");
+        {
+            // Get all available methods for suggestions
+            var allMethods = _packageRepository.GetAll()
+                .SelectMany(p => p.Methods)
+                .Select(m => m.MethodName)
+                .Distinct()
+                .OrderBy(m => m)
+                .ToList();
+
+            var suggestions = allMethods
+                .Where(m => m.Contains(methodName, StringComparison.OrdinalIgnoreCase) ||
+                           LevenshteinDistance(m, methodName) <= 3)
+                .Take(5)
+                .ToList();
+
+            var suggestionText = suggestions.Count > 0
+                ? $" Did you mean: {string.Join(", ", suggestions)}?"
+                : $" Available methods in loaded packages: {string.Join(", ", allMethods.Take(10))}...";
+
+            throw new InvalidOperationException(
+                $"Method '{methodName}' not found in any loaded package.{suggestionText}");
+        }
 
         // Find the best matching method based on parameter count
         var paramCount = parameters?.Length ?? 0;
@@ -41,9 +62,13 @@ public class DynamicMethodInvoker(IPackageRepository packageRepository)
 
         if (matchingMethod == null)
         {
+            var availableSignatures = methodInfos.Select(m =>
+                $"{m.MethodName}({string.Join(", ", m.Parameters.Select(p => $"{p.Type} {p.Name}"))})"
+            ).ToList();
+
             throw new InvalidOperationException(
-                $"No overload of method '{methodName}' matches the provided parameter count ({paramCount}). " +
-                $"Available overloads: {string.Join(", ", methodInfos.Select(m => m.Parameters.Count))}");
+                $"No overload of method '{methodName}' matches the provided parameter count ({paramCount}).\n" +
+                $"Available signatures:\n  - {string.Join("\n  - ", availableSignatures)}");
         }
 
         return InvokeMethod(matchingMethod, parameters, instance);
@@ -88,10 +113,18 @@ public class DynamicMethodInvoker(IPackageRepository packageRepository)
 
         // Validate instance requirement
         if (!methodInfo.IsStatic && instance == null)
-            throw new InvalidOperationException($"Method '{methodInfo.MethodName}' is not static and requires an instance.");
+        {
+            throw new InvalidOperationException(
+                $"Method '{methodInfo.TypeFullName}.{methodInfo.MethodName}' is an instance method and requires an object instance.\n" +
+                $"Tip: Create an instance using CreateInstance(\"{methodInfo.TypeFullName}\") and pass it as the 'instance' parameter.");
+        }
 
         if (methodInfo.IsStatic && instance != null)
-            throw new InvalidOperationException($"Method '{methodInfo.MethodName}' is static and should not have an instance.");
+        {
+            throw new InvalidOperationException(
+                $"Method '{methodInfo.TypeFullName}.{methodInfo.MethodName}' is static and should be called without an instance.\n" +
+                $"Tip: Pass null as the 'instance' parameter for static methods.");
+        }
 
         // Invoke the method
         try
@@ -142,7 +175,29 @@ public class DynamicMethodInvoker(IPackageRepository packageRepository)
         var typeInfos = _packageRepository.FindTypesByName(typeFullName).ToList();
 
         if (typeInfos.Count == 0)
-            throw new InvalidOperationException($"Type '{typeFullName}' not found in any loaded package.");
+        {
+            // Get similar type names for suggestions
+            var allTypes = _packageRepository.GetAll()
+                .SelectMany(p => p.Types)
+                .Select(t => t.FullName)
+                .Distinct()
+                .OrderBy(t => t)
+                .ToList();
+
+            var suggestions = allTypes
+                .Where(t => t.Contains(typeFullName, StringComparison.OrdinalIgnoreCase) ||
+                           t.EndsWith("." + typeFullName, StringComparison.OrdinalIgnoreCase) ||
+                           LevenshteinDistance(t, typeFullName) <= 3)
+                .Take(5)
+                .ToList();
+
+            var suggestionText = suggestions.Count > 0
+                ? $" Did you mean: {string.Join(", ", suggestions)}?"
+                : $" Available types: {string.Join(", ", allTypes.Take(10))}...";
+
+            throw new InvalidOperationException(
+                $"Type '{typeFullName}' not found in any loaded package.{suggestionText}");
+        }
 
         var typeInfo = typeInfos.First();
         var assembly = GetOrLoadAssembly(typeInfo.AssemblyName);
@@ -154,11 +209,21 @@ public class DynamicMethodInvoker(IPackageRepository packageRepository)
         try
         {
             return Activator.CreateInstance(type, constructorArgs) 
-                ?? throw new InvalidOperationException($"Failed to create instance of type '{typeFullName}'.");
+                ?? throw new InvalidOperationException(
+                    $"Failed to create instance of type '{typeFullName}'.\n" +
+                    $"The constructor returned null, which may indicate an abstract class or interface.\n" +
+                    $"Tip: Ensure the type is a concrete class with a matching public constructor.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException)
         {
-            throw new InvalidOperationException($"Error creating instance of type '{typeFullName}': {ex.Message}", ex);
+            var argTypes = constructorArgs?.Select(a => a?.GetType().Name ?? "null").ToArray() ?? Array.Empty<string>();
+            var argTypeStr = argTypes.Length > 0 ? string.Join(", ", argTypes) : "none";
+            
+            throw new InvalidOperationException(
+                $"Error creating instance of type '{typeFullName}'.\n" +
+                $"Constructor arguments: {argTypeStr}\n" +
+                $"Error: {ex.Message}\n" +
+                $"Tip: Verify the type has a public constructor matching the provided arguments.", ex);
         }
     }
 
@@ -177,9 +242,47 @@ public class DynamicMethodInvoker(IPackageRepository packageRepository)
             .FirstOrDefault(a => a.GetName().Name?.Equals(assemblyName, StringComparison.OrdinalIgnoreCase) == true);
 
         if (assembly == null)
-            throw new InvalidOperationException($"Assembly '{assemblyName}' not found. Ensure the package is loaded.");
+        {
+            var loadedPackages = _packageRepository.GetAll()
+                .Select(p => $"{p.PackageId} ({string.Join(", ", p.Assemblies)})")
+                .ToList();
+
+            var packagesText = loadedPackages.Count > 0
+                ? $"\nLoaded packages:\n  - {string.Join("\n  - ", loadedPackages)}"
+                : " No packages are currently loaded.";
+
+            throw new InvalidOperationException(
+                $"Assembly '{assemblyName}' not found. Ensure the package containing this assembly is loaded.{packagesText}");
+        }
 
         _loadedAssemblies[assemblyName] = assembly;
         return assembly;
+    }
+
+    /// <summary>
+    /// Calculates the Levenshtein distance between two strings for similarity matching.
+    /// </summary>
+    private static int LevenshteinDistance(string source, string target)
+    {
+        if (string.IsNullOrEmpty(source)) return target?.Length ?? 0;
+        if (string.IsNullOrEmpty(target)) return source.Length;
+
+        var distance = new int[source.Length + 1, target.Length + 1];
+
+        for (var i = 0; i <= source.Length; i++) distance[i, 0] = i;
+        for (var j = 0; j <= target.Length; j++) distance[0, j] = j;
+
+        for (var i = 1; i <= source.Length; i++)
+        {
+            for (var j = 1; j <= target.Length; j++)
+            {
+                var cost = char.ToLowerInvariant(target[j - 1]) == char.ToLowerInvariant(source[i - 1]) ? 0 : 1;
+                distance[i, j] = Math.Min(
+                    Math.Min(distance[i - 1, j] + 1, distance[i, j - 1] + 1),
+                    distance[i - 1, j - 1] + cost);
+            }
+        }
+
+        return distance[source.Length, target.Length];
     }
 }

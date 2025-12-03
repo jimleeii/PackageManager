@@ -14,19 +14,59 @@ PackageManager is a comprehensive library that enables:
 ## Solution Structure
 
 ```
-PackageManager.sln
+PackageManager/
+├── .editorconfig                 # Code style and formatting rules
+├── .gitignore                    # Git ignore rules
+├── CHANGELOG.md                  # Version history and changes
+├── Directory.Build.props         # Shared MSBuild properties
+├── LICENSE                       # MIT License
+├── NuGet.Config                  # NuGet package sources
+├── PackageManager.sln            # Solution file
+├── README.md                     # This file
+│
 ├── src/                          # Main library (PackageManager.csproj)
 │   ├── Configuration/            # Service registration and options
+│   │   ├── PackageLoaderDisposalService.cs
+│   │   ├── PackageManagerExtensions.cs
+│   │   └── PackageManagerOptions.cs
 │   ├── Core/                     # Package loading and project context
+│   │   ├── PackageAssemblyLoadContext.cs
+│   │   ├── PackageLoader.cs
+│   │   └── ProjectContext.cs
 │   ├── FileWatching/            # File system monitoring
-│   ├── Helper/                   # Utilities and extensions
+│   │   ├── PackageFileWatcher.cs
+│   │   └── PackageFileWatcherService.cs
+│   ├── Helpers/                  # Utilities and extensions
+│   │   ├── LoggerExtensions.cs
+│   │   └── PackageFrameworkSorter.cs
 │   ├── Models/                   # Data models
+│   │   ├── PackageMetadata.cs
+│   │   └── PackageMethodInfo.cs
 │   ├── Repository/              # Package metadata repository
+│   │   ├── IPackageRepository.cs
+│   │   └── PackageRepository.cs
 │   └── Services/                # Core services (scanner, invoker)
-└── test/                         # Test project (Test.csproj)
-    ├── Examples/                # Usage examples
-    ├── Program.cs               # Test application entry point
-    └── RepositoryDemo.cs        # Repository demonstration
+│       ├── DynamicMethodInvoker.cs
+│       └── PackageScanner.cs
+│
+└── tests/                        # Test projects
+    ├── PackageManager.UnitTests/         # Unit tests
+    │   ├── DynamicMethodInvokerTests.cs
+    │   ├── PackageManagerOptionsTests.cs
+    │   ├── PackageRepositoryTests.cs
+    │   ├── PackageScannerTests.cs
+    │   └── README.md
+    ├── PackageManager.IntegrationTests/  # Integration tests
+    │   ├── PackageRepositoryUsageExample.cs
+    │   ├── Program.cs
+    │   ├── RepositoryDemo.cs
+    │   ├── appsettings.json
+    │   └── README.md
+    └── PackageManager.Benchmarks/        # Performance benchmarks
+        ├── BenchmarkRunner.cs
+        ├── PackageManagerBenchmarks.cs
+        ├── Program.cs
+        └── README.md
 ```
 
 ### Key Components
@@ -73,7 +113,7 @@ Add to your `appsettings.json`:
 {
   "PackageManager": {
     "PackageSource": "C:\\path\\to\\packages",
-    "AllowedFrameworks": ["net10.0", "net9.0", "net8.0"],
+    "AllowedFrameworks": ["net9.0", "net8.0", "netstandard2.1"],
     "EnableFileWatching": true,
     "ScanOnStartup": true
   }
@@ -198,6 +238,54 @@ var interfaces = _repository.GetAll()
     .SelectMany(p => p.Types)
     .Where(t => t.IsInterface);
 ```
+
+### 5. Assembly Isolation (Advanced)
+
+For scenarios requiring assembly unloading (plugins, hot-reload, memory management), use `AssemblyLoadContext` isolation:
+
+```csharp
+// Enable assembly isolation when creating PackageLoader
+var loader = new PackageLoader(
+    repository, 
+    scanner, 
+    options,
+    useIsolation: true  // Enable isolated loading
+);
+
+// Check isolation status
+if (loader.IsIsolationEnabled)
+{
+    Console.WriteLine("Assemblies loaded in isolated context");
+    Console.WriteLine($"Load Context: {loader.LoadContext?.Name}");
+}
+
+// When disposed, the isolated context unloads all assemblies
+loader.Dispose();  // Assemblies are unloaded from memory
+```
+
+**Benefits of Assembly Isolation:**
+- **Memory Management**: Unload assemblies when no longer needed
+- **Version Isolation**: Load different versions of the same assembly
+- **Plugin Scenarios**: Isolate plugin assemblies from main application
+- **Hot Reload**: Unload and reload updated assemblies without restart
+- **Reduced Memory Footprint**: Free memory from unused packages
+
+**Trade-offs:**
+- Slightly slower assembly loading
+- Cannot share types across contexts
+- Requires careful lifetime management
+
+**When to use isolation:**
+- Long-running applications with dynamic plugins
+- Applications that load/unload packages frequently
+- Multi-tenant scenarios with isolated workspaces
+- Development tools requiring assembly reload
+
+**Default behavior (useIsolation=false):**
+- Assemblies loaded in default context
+- Better performance for static scenarios
+- Simpler programming model
+- Cannot unload assemblies
 
 ## Common Scenarios
 
@@ -389,7 +477,7 @@ public class PackageExplorerService
 
 ## Error Handling
 
-Always wrap invocations in try-catch blocks:
+The library provides detailed, helpful error messages with suggestions:
 
 ```csharp
 try
@@ -398,13 +486,23 @@ try
 }
 catch (InvalidOperationException ex)
 {
-    Console.WriteLine($"Method not found or invocation failed: {ex.Message}");
+    // Error messages include suggestions for similar methods
+    // Example: "Method 'Serilize' not found. Did you mean: Serialize, SerializeObject?"
+    Console.WriteLine($"Error: {ex.Message}");
 }
 catch (TargetInvocationException ex)
 {
     Console.WriteLine($"Method threw an exception: {ex.InnerException?.Message}");
 }
 ```
+
+### Intelligent Error Messages
+
+- **Method not found**: Suggests similar method names based on fuzzy matching
+- **Type not found**: Shows available types and partial matches
+- **Parameter mismatch**: Displays full method signatures with parameter types
+- **Assembly not found**: Lists all loaded packages and their assemblies
+- **Directory not found**: Shows resolved paths and actionable tips
 
 ## Performance Tips
 
@@ -413,6 +511,43 @@ catch (TargetInvocationException ex)
 3. **Batch queries**: Use LINQ to query once instead of multiple calls
 4. **Async for I/O**: Use InvokeMethodAsync for I/O-bound methods
 5. **Thread Safety**: Repository is thread-safe for concurrent access
+6. **Lazy evaluation**: Repository queries use `IEnumerable` for deferred execution
+7. **Assembly isolation**: Only enable when needed (plugins, hot-reload) - default is faster
+
+## Benchmarks
+
+Performance benchmarks are available using BenchmarkDotNet. To run:
+
+```bash
+# Run all benchmarks
+dotnet run --project test/Test.csproj -c Release -- --benchmarks
+
+# Or use the BenchmarkRunner directly
+```
+
+### Benchmark Categories
+
+**Repository Operations:**
+- `AddOrUpdatePackage` - Adding/updating package metadata
+- `GetByPackageId` - Retrieving by package ID
+- `GetByPackageIdAndVersion` - Retrieving by ID and version
+- `FindMethodsByName` - Finding methods by name across all packages
+- `FindMethodsByType` - Finding methods in specific types
+- `QueryAsyncMethods` - Complex LINQ queries over methods
+- `ComplexQuery` - Multi-filter LINQ queries
+
+**Assembly Loading:**
+- `LoadAssembly_DefaultContext` - Standard assembly loading (baseline)
+- `LoadAssembly_IsolatedContext` - Isolated loading with unload capability
+
+**Scanner Operations:**
+- `ScanAssembly_SystemLinq` - Metadata extraction performance
+
+**Expected Performance:**
+- Repository operations: Sub-microsecond for lookups
+- Method queries: ~1-10ms for 20,000 methods across 100 packages
+- Assembly isolation overhead: ~2-5x slower than default context
+- Memory: Isolated contexts use more memory but can be unloaded
 
 ## Thread Safety
 
@@ -474,9 +609,8 @@ dotnet run --project test/Test.csproj
     }
   },
   "PackageManager": {
-    "PackageSource": "C:\\Packages",
+    "PackageSource": "plugins",
     "AllowedFrameworks": [
-      "net10.0",
       "net9.0",
       "net8.0",
       "netstandard2.1",
@@ -490,11 +624,11 @@ dotnet run --project test/Test.csproj
 
 ### Configuration Options
 
-- **`PackageSource`** (string): The directory path containing NuGet package files (.nupkg). This is where the package manager will look for packages to load.
+- **`PackageSource`** (string, **required**): The directory path containing NuGet package files (.nupkg). This is where the package manager will look for packages to load. Can be relative or absolute path. **Validated at startup** - application will fail to start if not configured or directory doesn't exist.
 
-- **`AllowedFrameworks`** (array of strings): List of .NET framework versions to load from packages. When specified, only assemblies from these framework folders will be scanned and loaded. If empty or omitted, all compatible frameworks are loaded. Useful for controlling which framework versions to use from multi-targeted packages.
+- **`AllowedFrameworks`** (array of strings, optional): List of .NET framework versions to load from packages. When specified, only assemblies from these framework folders will be scanned and loaded. If empty or omitted, all compatible frameworks are loaded. **Validated at startup** - framework identifiers must start with 'net', 'netstandard', or 'netcoreapp'.
 
-- **`EnableFileWatching`** (bool, default: `true`): Enables file system monitoring of the PackageSource directory. When enabled, the package manager automatically detects and processes new or changed .nupkg files.
+- **`EnableFileWatching`** (bool, default: `true`): Enables file system monitoring of the PackageSource directory. When enabled, the package manager automatically detects and processes new or changed .nupkg files with debouncing to prevent duplicate processing.
 
 - **`ScanOnStartup`** (bool, default: `true`): Controls whether packages are automatically scanned and loaded during application startup when `UsePackageManager()` is called. Set to `false` to defer package loading or load packages on-demand.
 
@@ -506,13 +640,18 @@ dotnet run --project test/Test.csproj
 ✅ **Reflection Simplified** - Easy-to-use API over raw reflection  
 ✅ **Type-Safe Queries** - Strongly-typed metadata models  
 ✅ **Async Support** - Full async/await support  
-✅ **Thread-Safe** - Concurrent access supported  
-✅ **Auto-Cataloging** - Automatic metadata extraction  
-✅ **File Watching** - Detect package changes in real-time  
+✅ **Thread-Safe** - Concurrent access with ConcurrentDictionary  
+✅ **Auto-Cataloging** - Automatic metadata extraction via PackageArchiveReader  
+✅ **File Watching** - Detect package changes in real-time with debouncing  
+✅ **Configuration Validation** - Fail-fast with data annotations  
+✅ **Helpful Error Messages** - Intelligent suggestions and fuzzy matching  
+✅ **Event-Based Logging** - Subscribe to diagnostic events instead of console output  
+✅ **Performance Optimized** - Lazy evaluation, cached comparers, efficient queries  
+✅ **Assembly Isolation** - Optional AssemblyLoadContext for unloading and memory management  
 
 ## Requirements
 
-- .NET 10.0 or later
+- .NET 8.0 or later (tested on .NET 9.0 and .NET 10.0)
 - NuGet.Configuration 7.0.1+
 - NuGet.Frameworks 7.0.1+
 - NuGet.PackageManagement 7.0.1+
@@ -529,7 +668,6 @@ dotnet run --project test/Test.csproj
 - [ ] Add LINQ query provider over repository
 - [ ] Support for generic method invocation
 - [ ] Package version management and rollback
-- [ ] Assembly unloading support
 - [ ] Package dependency graph visualization
 
 ## License

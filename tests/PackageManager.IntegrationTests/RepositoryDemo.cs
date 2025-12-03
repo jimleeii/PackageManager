@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PackageManager.Repository;
 using PackageManager.Services;
 
-namespace Test;
+namespace PackageManager.IntegrationTests;
 
 /// <summary>
 /// Example class demonstrating how to use the package repository system.

@@ -44,6 +44,7 @@ public class PackageRepository : IPackageRepository
     /// <inheritdoc/>
     public IEnumerable<PackageMetadata> GetAll()
     {
+        // Return a snapshot to avoid issues with concurrent modifications
         return _packages.Values.ToList();
     }
 
@@ -52,10 +53,10 @@ public class PackageRepository : IPackageRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
 
+        // Return query without materializing - let caller decide when to enumerate
         return _packages.Values
             .SelectMany(p => p.Methods)
-            .Where(m => m.MethodName.Equals(methodName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+            .Where(m => m.MethodName.Equals(methodName, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <inheritdoc/>
@@ -63,10 +64,10 @@ public class PackageRepository : IPackageRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(typeFullName);
 
+        // Return query without materializing - let caller decide when to enumerate
         return _packages.Values
             .SelectMany(p => p.Methods)
-            .Where(m => m.TypeFullName.Equals(typeFullName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+            .Where(m => m.TypeFullName.Equals(typeFullName, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <inheritdoc/>
@@ -74,11 +75,11 @@ public class PackageRepository : IPackageRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(typeName);
 
+        // Return query without materializing - let caller decide when to enumerate
         return _packages.Values
             .SelectMany(p => p.Types)
             .Where(t => t.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase) ||
-                       t.FullName.Equals(typeName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+                       t.FullName.Equals(typeName, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <inheritdoc/>
