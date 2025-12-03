@@ -113,9 +113,13 @@ public static class LoggerExtensions
     /// </summary>
     private sealed class OperationScope(ILogger logger, string operationName) : IDisposable
     {
+        // Keep a reference to the logger and operation name for logging
         private readonly ILogger _logger = logger;
+        // Store the operation name
         private readonly string _operationName = operationName;
+        // Stopwatch to measure elapsed time
         private readonly System.Diagnostics.Stopwatch _stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        // Flag to indicate if the scope has been disposed
         private bool _disposed;
 
         /// <summary>

@@ -33,7 +33,7 @@ public class PackageFileWatcherService(
     /// is requested or if the local source directory is not configured or does not exist.</returns>
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (string.IsNullOrWhiteSpace(_options.LocalSource) || !Directory.Exists(_options.LocalSource))
+        if (string.IsNullOrWhiteSpace(_options.PackageSource) || !Directory.Exists(_options.PackageSource))
         {
             _logger.LogWarning("LocalSource not configured or does not exist. File watching is disabled.");
             return Task.CompletedTask;
@@ -41,18 +41,18 @@ public class PackageFileWatcherService(
 
         try
         {
-            _watcher = new PackageFileWatcher(_options.LocalSource);
+            _watcher = new PackageFileWatcher(_options.PackageSource);
             _watcher.FileChanged += OnFileChanged;
             _watcher.Start();
 
-            _logger.LogFileOperation("Started watching", _options.LocalSource);
+            _logger.LogFileOperation("Started watching", _options.PackageSource);
 
             // Keep the service running until cancellation
             return Task.Delay(Timeout.Infinite, stoppingToken);
         }
         catch (Exception ex)
         {
-            _logger.LogErrorWithContext(ex, "Failed to start file watcher for: {FilePath}", _options.LocalSource);
+            _logger.LogErrorWithContext(ex, "Failed to start file watcher for: {FilePath}", _options.PackageSource);
             return Task.CompletedTask;
         }
     }
@@ -85,50 +85,7 @@ public class PackageFileWatcherService(
                 return;
             }
 
-            // Extract package name and version from file name (e.g., "Newtonsoft.Json.13.0.1")
-            string packageName = Path.GetFileNameWithoutExtension(e.FilePath);
-
-            if (string.IsNullOrWhiteSpace(packageName))
-            {
-                if (_logger.IsEnabled(LogLevel.Warning))
-                {
-                    _logger.LogWarning("Could not extract package name from: {FilePath}", e.FilePath);
-                }
-                return;
-            }
-
-            // Split package name and version (last segment after final dot is assumed to be version)
-            var parts = packageName.Split('.');
-            string? packageId = null;
-            string? version = null;
-
-            // Find where the version starts (first numeric segment)
-            int versionStartIndex = -1;
-            for (int i = parts.Length - 1; i >= 0; i--)
-            {
-                if (char.IsDigit(parts[i][0]))
-                {
-                    versionStartIndex = i;
-                }
-                else
-                {
-                    break;
-                }
-            }
-
-            if (versionStartIndex > 0)
-            {
-                packageId = string.Join(".", parts.Take(versionStartIndex));
-                version = string.Join(".", parts.Skip(versionStartIndex));
-            }
-            else
-            {
-                packageId = packageName;
-            }
-
-            _logger.LogPackageOperation(packageId, version ?? "(latest)", "Loading");
-            await _packageLoader.InstallPackageAsync(packageId, version);
-
+            await _packageLoader.InstallPackageAsync(filePath: e.FilePath, logger: _logger);
             _logger.LogInfo("Successfully loaded packages from: {FilePath}", e.FilePath);
         }
         catch (Exception ex)

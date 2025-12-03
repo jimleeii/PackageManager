@@ -32,6 +32,8 @@ public class PackageLoader : IDisposable
     private readonly IPackageRepository? _packageRepository;
     // Package scanner for extracting metadata
     private readonly PackageScanner? _packageScanner;
+    // List of allowed frameworks
+    private readonly List<string>? _allowedFrameworks;
     // Flag to indicate whether the object has been disposed
     private bool _disposed;
 
@@ -41,15 +43,17 @@ public class PackageLoader : IDisposable
     /// <param name="packagesFolder">The path to the folder where NuGet packages will be stored. Defaults to "packages".</param>
     /// <param name="localSource">The path to a local folder containing NuGet packages. Defaults to null.</param>
     /// <param name="packageRepository">Optional package repository for storing package metadata.</param>
+    /// <param name="allowedFrameworks">Optional list of allowed framework versions to load. If null or empty, all compatible frameworks are loaded.</param>
     /// <remarks>
     /// This constructor sets up the packages folder and subscribes to the <see cref="AppDomain.AssemblyResolve"/> event
     /// to handle assembly resolution for NuGet packages.
     /// </remarks>
-    public PackageLoader(string packagesFolder = "packages", string? localSource = null, IPackageRepository? packageRepository = null)
+    public PackageLoader(string packagesFolder = "packages", string? localSource = null, IPackageRepository? packageRepository = null, List<string>? allowedFrameworks = null)
     {
         _packagesFolder = Path.GetFullPath(packagesFolder);
         _packageRepository = packageRepository;
         _packageScanner = packageRepository != null ? new PackageScanner() : null;
+        _allowedFrameworks = allowedFrameworks;
 
         // Add default NuGet source
         _packageSources.Add(new PackageSource("https://api.nuget.org/v3/index.json", "nuget.org"));
@@ -64,6 +68,59 @@ public class PackageLoader : IDisposable
         }
 
         AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
+    }
+
+    /// <summary>
+    /// Installs a package from the specified file path.
+    /// </summary>
+    /// <param name="filePath">The file path of the package to install</param>
+    /// <param name="logger">An optional logger for logging package installation operations</param>
+    /// <returns>A task that represents the asynchronous installation operation</returns>
+    public async Task InstallPackageAsync(string filePath, Microsoft.Extensions.Logging.ILogger? logger = null)
+    {
+        // Extract package name and version from file name (e.g., "Newtonsoft.Json.13.0.1")
+        string packageName = Path.GetFileNameWithoutExtension(filePath);
+
+        if (string.IsNullOrWhiteSpace(packageName))
+        {
+            if (logger?.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Warning) == true)
+            {
+                logger.LogWarning("Could not extract package name from: {FilePath}", filePath);
+            }
+            return;
+        }
+
+        // Split package name and version (last segment after final dot is assumed to be version)
+        var parts = packageName.Split('.');
+        string? packageId = null;
+        string? version = null;
+
+        // Find where the version starts (first numeric segment)
+        int versionStartIndex = -1;
+        for (int i = parts.Length - 1; i >= 0; i--)
+        {
+            if (char.IsDigit(parts[i][0]))
+            {
+                versionStartIndex = i;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (versionStartIndex > 0)
+        {
+            packageId = string.Join(".", parts.Take(versionStartIndex));
+            version = string.Join(".", parts.Skip(versionStartIndex));
+        }
+        else
+        {
+            packageId = packageName;
+        }
+
+        logger?.LogPackageOperation(packageId, version ?? "(latest)", "Loading");
+        await InstallPackageAsync(packageId, version);
     }
 
     /// <summary>
@@ -212,6 +269,7 @@ public class PackageLoader : IDisposable
     /// <param name="framework">The framework to collect assembly paths for.</param>
     /// <remarks>
     /// The best matching framework (i.e. the highest version) is selected for each package.
+    /// If AllowedFrameworks is configured, only those frameworks will be considered.
     /// </remarks>
     private void CollectAssemblyPaths(NuGetFramework framework)
     {
@@ -226,9 +284,12 @@ public class PackageLoader : IDisposable
                 .Select(d => new
                 {
                     Path = d,
+                    FrameworkName = Path.GetFileName(d),
                     Framework = NuGetFramework.Parse(Path.GetFileName(d))
                 })
                 .Where(f => DefaultCompatibilityProvider.Instance.IsCompatible(framework, f.Framework))
+                .Where(f => _allowedFrameworks == null || _allowedFrameworks.Count == 0 || 
+                           _allowedFrameworks.Contains(f.FrameworkName, StringComparer.OrdinalIgnoreCase))
                 .OrderByDescending(f => f.Framework, new PackageFrameworkSorter())
                 .ToList();
 
@@ -289,7 +350,7 @@ public class PackageLoader : IDisposable
             }
 
             // Scan the package
-            var metadata = _packageScanner.ScanPackage(packageDir, packageId, version);
+            var metadata = _packageScanner.ScanPackage(packageDir, packageId, version, _allowedFrameworks);
 
             // Add to repository
             _packageRepository.AddOrUpdate(metadata);
@@ -299,7 +360,7 @@ public class PackageLoader : IDisposable
         catch (Exception ex)
         {
             Console.WriteLine($"Error cataloging package '{packageId}': {ex.Message}");
-            Task.FromException(ex);
+            return Task.FromException(ex);
         }
 
         return Task.CompletedTask;

@@ -99,8 +99,9 @@ public class PackageScanner
     /// <param name="packagePath">The path to the package directory.</param>
     /// <param name="packageId">The package identifier.</param>
     /// <param name="version">The package version.</param>
+    /// <param name="allowedFrameworks">Optional list of allowed framework versions. If null or empty, all frameworks are scanned.</param>
     /// <returns>Package metadata containing all scanned information.</returns>
-    public PackageMetadata ScanPackage(string packagePath, string packageId, string version)
+    public PackageMetadata ScanPackage(string packagePath, string packageId, string version, List<string>? allowedFrameworks = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packagePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
@@ -124,6 +125,15 @@ public class PackageScanner
         // Scan all framework folders
         foreach (var frameworkDir in Directory.EnumerateDirectories(libPath))
         {
+            var frameworkName = Path.GetFileName(frameworkDir);
+            
+            // Skip if framework is not in allowed list (when list is provided and not empty)
+            if (allowedFrameworks != null && allowedFrameworks.Count > 0 && 
+                !allowedFrameworks.Contains(frameworkName, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var dllFiles = Directory.GetFiles(frameworkDir, "*.dll");
 
             foreach (var dllFile in dllFiles)

@@ -7,19 +7,16 @@ namespace PackageManager.Services;
 /// <summary>
 /// Service for dynamically invoking methods from loaded packages.
 /// </summary>
-public class DynamicMethodInvoker
+/// <remarks>
+/// Initializes a new instance of the <see cref="DynamicMethodInvoker"/> class.
+/// </remarks>
+/// <param name="packageRepository">The package repository containing method metadata.</param>
+public class DynamicMethodInvoker(IPackageRepository packageRepository)
 {
-    private readonly IPackageRepository _packageRepository;
-    private readonly Dictionary<string, Assembly> _loadedAssemblies = new();
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="DynamicMethodInvoker"/> class.
-    /// </summary>
-    /// <param name="packageRepository">The package repository containing method metadata.</param>
-    public DynamicMethodInvoker(IPackageRepository packageRepository)
-    {
-        _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
-    }
+    // The package repository to retrieve method information from
+    private readonly IPackageRepository _packageRepository = packageRepository ?? throw new ArgumentNullException(nameof(packageRepository));
+    // A cache of loaded assemblies
+    private readonly Dictionary<string, Assembly> _loadedAssemblies = [];
 
     /// <summary>
     /// Invokes a method by name with the specified parameters.

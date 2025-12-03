@@ -40,10 +40,10 @@ public static class PackageManagerExtensions
         {
             var opts = sp.GetRequiredService<IOptions<PackageManagerOptions>>().Value;
             var repository = sp.GetRequiredService<IPackageRepository>();
-            return new PackageLoader("packages", opts.LocalSource, repository);
+            return new PackageLoader("packages", opts.PackageSource, repository, opts.AllowedFrameworks);
         });
 
-        if (options?.WithFileWatcher == true)
+        if (options?.EnableFileWatching == true)
         {
             services.AddHostedService<PackageFileWatcherService>();
         }
@@ -54,56 +54,31 @@ public static class PackageManagerExtensions
     /// </summary>
     /// <param name="app">The web application instance</param>
     /// <returns>A task that represents the asynchronous installation operation</returns>
-    /// <exception cref="DirectoryNotFoundException">Thrown when the configured package directory does not exist</exception>
+    /// <exception cref="DirectoryNotFoundException">Thrown when the configured package directory does not exist and ScanOnStartup is enabled</exception>
     /// <remarks>
-    /// This method scans the directory specified in <see cref="PackageManagerOptions.LocalSource"/> for all .nupkg files
+    /// This method scans the directory specified in <see cref="PackageManagerOptions.PackageSource"/> for all .nupkg files
     /// and installs them using the registered <see cref="PackageLoader"/>. Call this method in the application startup pipeline
     /// after building the WebApplication to ensure packages are loaded before the application starts handling requests.
+    /// Package scanning only occurs if <see cref="PackageManagerOptions.ScanOnStartup"/> is set to true.
     /// </remarks>
     public static async Task UsePackageManager(this WebApplication app)
     {
-        var loader = app.Services.GetRequiredService<PackageLoader>();
         var options = app.Services.GetRequiredService<IOptions<PackageManagerOptions>>().Value;
 
-        string directoryPath = options.LocalSource;
+        // Only scan if ScanOnStartup is enabled
+        if (!options.ScanOnStartup)
+        {
+            return;
+        }
+
+        string directoryPath = options.PackageSource;
         if (!Directory.Exists(directoryPath))
             throw new DirectoryNotFoundException($"Directory not found: {directoryPath}");
 
+        var loader = app.Services.GetRequiredService<PackageLoader>();
         foreach (var file in Directory.GetFiles(directoryPath, "*.nupkg"))
         {
-            // Extract package ID and version from the .nupkg filename
-            string packageName = Path.GetFileNameWithoutExtension(file);
-
-            // Split package name and version (last segment after final dot is assumed to be version)
-            var parts = packageName.Split('.');
-
-            // Find where the version starts (first numeric segment)
-            int versionStartIndex = -1;
-            for (int i = parts.Length - 1; i >= 0; i--)
-            {
-                if (char.IsDigit(parts[i][0]))
-                {
-                    versionStartIndex = i;
-                }
-                else
-                {
-                    break;
-                }
-            }
-
-            string packageId;
-            string? version = null;
-            if (versionStartIndex > 0)
-            {
-                packageId = string.Join(".", parts.Take(versionStartIndex));
-                version = string.Join(".", parts.Skip(versionStartIndex));
-            }
-            else
-            {
-                packageId = packageName;
-            }
-
-            await loader.InstallPackageAsync(packageId, version);
+            await loader.InstallPackageAsync(filePath: file);
         }
     }
 }

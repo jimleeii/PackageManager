@@ -1,21 +1,18 @@
 using PackageManager.Repository;
 using PackageManager.Services;
 
-namespace PackageManager.Examples;
+namespace Test.Examples;
 
 /// <summary>
 /// Example usage of the package repository and dynamic method invoker.
 /// </summary>
-public class PackageRepositoryUsageExample
+/// <remarks>
+/// Initializes a new instance of the <see cref="PackageRepositoryUsageExample"/> class.
+/// </remarks>
+public class PackageRepositoryUsageExample(IPackageRepository packageRepository, DynamicMethodInvoker methodInvoker)
 {
-    private readonly IPackageRepository _packageRepository;
-    private readonly DynamicMethodInvoker _methodInvoker;
-
-    public PackageRepositoryUsageExample(IPackageRepository packageRepository, DynamicMethodInvoker methodInvoker)
-    {
-        _packageRepository = packageRepository;
-        _methodInvoker = methodInvoker;
-    }
+    private readonly IPackageRepository _packageRepository = packageRepository;
+    private readonly DynamicMethodInvoker _methodInvoker = methodInvoker;
 
     /// <summary>
     /// Example: Query all loaded packages.
