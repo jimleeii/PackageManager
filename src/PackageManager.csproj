@@ -18,8 +18,15 @@
     <RepositoryType>git</RepositoryType>
     <Description>A dynamic NuGet package management system with runtime discovery and invocation capabilities for .NET applications.</Description>
     <PackageTags>nuget;package-manager;dynamic;runtime;reflection;dependency-injection</PackageTags>
-    <IsPackable>true</IsPackable>
     <PackageIcon>icon.png</PackageIcon>
+
+    <!-- Enable Source Link for better debugging experience -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,6 +35,9 @@
     <PackageReference Include="NuGet.PackageManagement" Version="7.0.1" />
     <PackageReference Include="NuGet.Protocol" Version="7.0.1" />
     <PackageReference Include="NuGet.Resolver" Version="7.0.1" />
+
+    <!-- Add SourceLink for better debugging experience -->
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
