@@ -45,7 +45,7 @@ jobs:
       run: dotnet test tests/PackageManager.IntegrationTests/PackageManager.IntegrationTests.csproj --configuration ${{ matrix.configuration }} --no-build --verbosity normal --logger "trx;LogFileName=integration-test-results.trx"
 
     - name: Upload test results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: test-results-${{ matrix.os }}-${{ matrix.configuration }}
@@ -111,7 +111,7 @@ jobs:
       run: dotnet pack src/PackageManager.csproj --configuration Release --no-build --output ./artifacts
 
     - name: Upload NuGet package artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: nuget-packages
         path: ./artifacts/*.nupkg
@@ -143,7 +143,7 @@ jobs:
       run: dotnet run --project tests/PackageManager.Benchmarks/PackageManager.Benchmarks.csproj --configuration Release --no-build
 
     - name: Upload benchmark results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: benchmark-results
