@@ -545,9 +545,11 @@ Performance benchmarks are available using BenchmarkDotNet. To run:
 
 ```bash
 # Run all benchmarks
-dotnet run --project test/Test.csproj -c Release -- --benchmarks
+dotnet run --project tests/PackageManager.Benchmarks/PackageManager.Benchmarks.csproj -c Release
 
-# Or use the BenchmarkRunner directly
+# Run in CI/CD environments (e.g., GitHub Actions)
+# The benchmark program automatically detects non-interactive environments
+# and skips the "Press any key" prompt
 ```
 
 ### Benchmark Categories
@@ -571,8 +573,12 @@ dotnet run --project test/Test.csproj -c Release -- --benchmarks
 **Expected Performance:**
 - Repository operations: Sub-microsecond for lookups
 - Method queries: ~1-10ms for 20,000 methods across 100 packages
-- Assembly isolation overhead: ~2-5x slower than default context
+- Assembly isolation overhead: ~2533x slower than default context
 - Memory: Isolated contexts use more memory but can be unloaded
+
+### CI/CD Integration
+
+The benchmark suite is compatible with GitHub Actions and other CI/CD environments. The program automatically detects when running in non-interactive mode (e.g., redirected console input) and skips interactive prompts.
 
 ## Thread Safety
 
@@ -697,11 +703,15 @@ dotnet run --project test/Test.csproj
 
 ## License
 
-[Your License Here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-[Your Contributing Guidelines Here]
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature-name`
+3. Commit your changes: `git commit -am 'Add some feature'`
+4. Push to the branch: `git push origin feature/your-feature-name`
+5. Submit a pull request
 
 ## Support
 

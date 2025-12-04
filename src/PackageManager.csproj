@@ -9,11 +9,17 @@
     <!-- Package Information -->
     <PackageId>PackageManager</PackageId>
     <Version>1.0.0</Version>
+    <Authors>Li Wei</Authors>
+    <Company>Li Wei</Company>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/jimleeii/PackageManager</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/jimleeii/PackageManager</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <Description>A dynamic NuGet package management system with runtime discovery and invocation capabilities for .NET applications.</Description>
     <PackageTags>nuget;package-manager;dynamic;runtime;reflection;dependency-injection</PackageTags>
     <IsPackable>true</IsPackable>
+    <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
