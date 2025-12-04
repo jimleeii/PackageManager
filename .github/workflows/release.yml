@@ -66,7 +66,7 @@ jobs:
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
       run: |
         echo "Publishing package to NuGet.org..."
-        dotnet nuget push "${{ env.PACKAGE_FILE }}" \
+        dotnet nuget push "$PACKAGE_FILE" \
           --api-key ${{ secrets.NUGET_API_KEY }} \
           --source https://api.nuget.org/v3/index.json \
           --skip-duplicate \
