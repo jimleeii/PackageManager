@@ -79,11 +79,14 @@ jobs:
         if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/* ]]; then
           echo "✅ Tag push detected - will publish to NuGet.org"
           echo "should_publish=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/heads/main ]]; then
+          echo "✅ Main branch push detected - will publish to NuGet.org"
+          echo "should_publish=true" >> $GITHUB_OUTPUT
         elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
           echo "⚠️  Manual workflow trigger - will publish to NuGet.org"
           echo "should_publish=true" >> $GITHUB_OUTPUT
         else
-          echo "ℹ️  Skipping NuGet.org publish (not a tag or manual trigger)"
+          echo "ℹ️  Skipping NuGet.org publish (not a tag, main branch push, or manual trigger)"
           echo "should_publish=false" >> $GITHUB_OUTPUT
         fi
 
