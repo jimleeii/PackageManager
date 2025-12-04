@@ -54,35 +54,70 @@ jobs:
 
     - name: Validate NuGet package
       run: |
+        echo "=== Validating NuGet Package ==="
         PACKAGE_FILE=$(find ./artifacts -name "*.nupkg" -not -name "*.symbols.nupkg" | head -n 1)
         if [ -z "$PACKAGE_FILE" ]; then
-          echo "Error: No NuGet package found!"
+          echo "❌ Error: No NuGet package found!"
           exit 1
         fi
-        echo "Package to publish: $PACKAGE_FILE"
+        echo "✅ Package found: $PACKAGE_FILE"
+        echo "Package size: $(du -h "$PACKAGE_FILE" | cut -f1)"
         echo "PACKAGE_FILE=$PACKAGE_FILE" >> $GITHUB_ENV
 
-    - name: Publish to NuGet.org
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    - name: Check publish conditions
+      id: should_publish
       run: |
-        echo "Publishing package to NuGet.org..."
+        echo "=== Checking Publish Conditions ==="
+        echo "Event name: ${{ github.event_name }}"
+        echo "Git ref: ${{ github.ref }}"
+        
+        if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/* ]]; then
+          echo "✅ Tag push detected - will publish to NuGet.org"
+          echo "should_publish=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "⚠️  Manual workflow trigger - will publish to NuGet.org"
+          echo "should_publish=true" >> $GITHUB_OUTPUT
+        else
+          echo "ℹ️  Skipping NuGet.org publish (not a tag or manual trigger)"
+          echo "should_publish=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Publish to NuGet.org
+      if: steps.should_publish.outputs.should_publish == 'true'
+      run: |
+        echo "=== Publishing to NuGet.org ==="
+        echo "Package: $PACKAGE_FILE"
+        echo "Version: ${{ steps.version.outputs.version }}"
+        echo ""
+        
         dotnet nuget push "$PACKAGE_FILE" \
           --api-key ${{ secrets.NUGET_API_KEY }} \
           --source https://api.nuget.org/v3/index.json \
           --skip-duplicate \
-          --no-symbols
+          --no-symbols \
+          2>&1 | tee nuget_push.log
         
-        if [ $? -eq 0 ]; then
-          echo "✓ Package published successfully!"
-          echo "Note: It may take 10-15 minutes to appear in NuGet.org search"
-          echo "Direct link: https://www.nuget.org/packages/Jimleeii.PackageManager/${{ steps.version.outputs.version }}"
+        EXIT_CODE=${PIPESTATUS[0]}
+        
+        echo ""
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "✅ Package published successfully to NuGet.org!"
+          echo ""
+          echo "📦 Package: DynamicPackageManager"
+          echo "🏷️  Version: ${{ steps.version.outputs.version }}"
+          echo "🔗 Direct link: https://www.nuget.org/packages/DynamicPackageManager/${{ steps.version.outputs.version }}"
+          echo ""
+          echo "⏱️  Note: It may take 10-15 minutes to appear in NuGet.org search"
         else
-          echo "✗ Package publish failed!"
+          echo "❌ Package publish failed with exit code: $EXIT_CODE"
+          echo ""
+          echo "Push log:"
+          cat nuget_push.log
           exit 1
         fi
 
     - name: Create GitHub Release
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      if: steps.should_publish.outputs.should_publish == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
         files: ./artifacts/*.nupkg

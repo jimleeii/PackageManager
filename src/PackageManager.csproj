@@ -7,7 +7,7 @@
     <OutputType>Library</OutputType>
     
     <!-- Package Information -->
-    <PackageId>PackageManager</PackageId>
+    <PackageId>DynamicPackageManager</PackageId>
     <Version>1.0.0</Version>
     <Authors>Li Wei</Authors>
     <Company>Li Wei</Company>

@@ -1,5 +1,6 @@
 <Project>
   <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -9,12 +10,17 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Authors>Your Name</Authors>
-    <Company>Your Company</Company>
+    <Authors>Li Wei</Authors>
+    <Company>Li Wei</Company>
     <Copyright>Copyright © $(Company) $([System.DateTime]::Now.Year)</Copyright>
-    <PackageProjectUrl>https://github.com/yourusername/PackageManager</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/yourusername/PackageManager</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/jimleeii/PackageManager</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/jimleeii/PackageManager</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
