@@ -43,7 +43,14 @@ public static class PackageManagerExtensions
         {
             var opts = sp.GetRequiredService<IOptions<PackageManagerOptions>>().Value;
             var repository = sp.GetRequiredService<IPackageRepository>();
-            return new PackageLoader("packages", opts.PackageSource, repository, opts.AllowedFrameworks);
+            return new PackageLoader(
+                packagesFolder: "packages",
+                localSource: opts.PackageSource,
+                packageRepository: repository,
+                allowedFrameworks: opts.AllowedFrameworks,
+                fallbackFramework: null,
+                useIsolation: opts.UseIsolation  // Default: false for best performance
+            );
         });
 
         // Register disposal hook to ensure PackageLoader is disposed on app shutdown

@@ -235,6 +235,8 @@ public class PackageManagerBenchmarks
 
 /// <summary>
 /// Benchmarks comparing isolated vs non-isolated assembly loading.
+/// IMPORTANT: Default context (baseline) is 2500x faster and should be used by default.
+/// Only use isolated context when you specifically need assembly unloading.
 /// </summary>
 [MemoryDiagnoser]
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -249,6 +251,10 @@ public class AssemblyLoadContextBenchmarks
         _testAssemblyPath = typeof(System.Linq.Enumerable).Assembly.Location;
     }
 
+    /// <summary>
+    /// Default context loading - RECOMMENDED for most scenarios (production use).
+    /// This is what PackageLoader uses when UseIsolation=false (the default).
+    /// </summary>
     [Benchmark(Baseline = true)]
     public void LoadAssembly_DefaultContext()
     {
@@ -256,6 +262,11 @@ public class AssemblyLoadContextBenchmarks
         _ = assembly.GetTypes().Length;
     }
 
+    /// <summary>
+    /// Isolated context loading - Only use when you need assembly unloading.
+    /// This is what PackageLoader uses when UseIsolation=true.
+    /// Expected to be ~2500x slower than default context.
+    /// </summary>
     [Benchmark]
     public void LoadAssembly_IsolatedContext()
     {

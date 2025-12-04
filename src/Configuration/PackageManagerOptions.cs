@@ -35,6 +35,14 @@ public class PackageManagerOptions
     /// </summary>
     [FrameworkVersions(ErrorMessage = "AllowedFrameworks contains invalid framework identifiers")]
     public List<string> AllowedFrameworks { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to use assembly isolation (AssemblyLoadContext).
+    /// When false (default), assemblies are loaded in the default context for better performance.
+    /// When true, assemblies are loaded in an isolated context that can be unloaded, with ~2500x slower loading.
+    /// Only enable this for scenarios requiring assembly unloading (plugins, hot-reload, multi-tenant).
+    /// </summary>
+    public bool UseIsolation { get; set; } = false;
 }
 
 /// <summary>
