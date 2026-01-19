@@ -37,7 +37,7 @@
     <PackageReference Include="NuGet.Resolver" Version="7.0.1" />
 
     <!-- Add SourceLink for better debugging experience -->
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.102" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
